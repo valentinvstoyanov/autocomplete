@@ -58,7 +58,6 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 	}
 
 	bool recognizes(ConstWordRef word) const {
-	  word.clear();
 	  return isFinal(delta(start, word));
 	}
 

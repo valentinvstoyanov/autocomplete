@@ -10,7 +10,7 @@ class Seeder {
  public:
 
   template<typename T>
-  using WordCallback = std::function<bool(const T&)>;
+	using WordCallback = std::function<bool(const T&)>;
 
   using FileCallback = std::function<bool(const char*, bool)>;
 
@@ -54,4 +54,3 @@ class Seeder {
 };
 
 #endif //SEEDER_H
-

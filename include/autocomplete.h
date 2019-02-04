@@ -3,13 +3,10 @@
 
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <functional>
 #include <optional>
 #include <cassert>
-#include <map>
-
-#include <iostream>
+#include <ostream>
 
 template<typename Char = char, typename Word = std::basic_string<Char>>
   class Autocomplete {
@@ -61,6 +58,7 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 	}
 
 	bool recognizes(ConstWordRef word) const {
+	  word.clear();
 	  return isFinal(delta(start, word));
 	}
 
@@ -89,18 +87,18 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 
 	OptionalState delta(State state, ConstWordRef word) const {
 	  for (Char ch: word) {
-		if (OptionalState next = delta(state, ch)) {
+		if (OptionalState next = delta(state, ch))
 		  state = *next;
-		} else {
+		else
 		  return {};
-		}
 	  }
 
 	  return state;
 	}
 
-	State commonPrefixWalk(ConstWordRef word,
-						   const std::function<bool(State from, Char with, State to)>& callback) const {
+	using WalkCallback = std::function<bool(State from, Char with, State to)>;
+
+	State commonPrefixWalk(ConstWordRef word, const WalkCallback& callback) const {
 	  State current = start;
 
 	  for (Char ch : word) {
@@ -108,6 +106,7 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 		if (OptionalState next = delta(current, ch)) {
 		  if (!callback(current, ch, *next))
 			return *next;
+
 		  current = *next;
 		} else {
 		  return current;
@@ -155,28 +154,34 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 	  states[from][suffix.back()] = newState(true);
 	}
 
-	void wordsFromState(State current, Word& word, size_t& counter, const std::function<void(ConstWordRef)>& callback) const {
-	  if (counter == suggestions_limit)
-		return;
+   public:
+	using WordCallback = std::function<void(ConstWordRef)>;
+   private:
 
+	void wordsFromState(State current,
+						Word& word,
+						size_t& counter,
+						const WordCallback& word_callback) const {
 	  if (isFinal(current)) {
-		callback(word);
+		word_callback(word);
 		++counter;
 	  }
+
+	  if (counter >= suggestions_limit)
+		return;
 
 	  auto state_it = states.find(current);
 	  assert(state_it != states.end() && "Cannot get words from non-existing state");
 
 	  const TransitionMap& transitions = state_it->second;
-	  for (auto tr_it = transitions.begin(); tr_it != transitions.end(); ++tr_it) {
+	  for (auto tr_it = transitions.begin(); counter < suggestions_limit && tr_it != transitions.end(); ++tr_it) {
 		word += tr_it->first;
-		const int old_word_len = word.length();
-		wordsFromState(tr_it->second, word, counter, callback);
+		const size_t old_word_len = word.length();
+		wordsFromState(tr_it->second, word, counter, word_callback);
 		word.erase(old_word_len - 1);
 	  }
 	}
    public:
-
 	explicit Autocomplete(size_t suggestions_limit = 5)
 		: start(0),
 		  states_info(1, kEmptyCh),
@@ -233,37 +238,37 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 	  ++word_counter;
 	}
 
-	bool suggest(ConstWordRef prefix, const std::function<void(ConstWordRef)>& callback) const {
+	bool suggest(ConstWordRef prefix, const WordCallback& word_callback) const {
 	  Word common_prefix;
 	  State last = commonPrefixWalk(prefix, [&common_prefix](State from, Char with, State to) -> bool {
 		common_prefix += with;
 		return true;
 	  });
 
-	  if(prefix.length() != common_prefix.length() && !delta(last, prefix[common_prefix.length() - 1]))
+	  if (prefix.length() != common_prefix.length() && !delta(last, prefix[common_prefix.length() - 1]))
 		return false;
 
 	  Word buff;
 	  size_t counter = 0;
-	  wordsFromState(last, buff, counter, callback);
+	  wordsFromState(last, buff, counter, word_callback);
 	  return true;
 	}
 
 	//TODO: delete this horrible function
-	void printInDotFormat() const {
-	  std::cout << "digraph {\n";
+	void printInDotFormat(std::ostream& out) const {
+	  out << "digraph {\n";
 
-	  for (auto nit = states.begin(); nit != states.end(); ++nit) {
-		TransitionMap& emap = nit->second;
+	  for (auto state_it = states.begin(); state_it != states.end(); ++state_it) {
+		TransitionMap& emap = state_it->second;
 
-		for (auto eit = emap.begin(); eit != emap.end(); ++eit)
-		  std::cout << '\t' << nit->first << " -> " << eit->second << " [label=\"" << eit->first << "\"];\n";
+		for (auto tr_it = emap.begin(); tr_it != emap.end(); ++tr_it)
+		  out << '\t' << state_it->first << " -> " << tr_it->second << " [label=\"" << tr_it->first << "\"];\n";
 
-		if (isFinal(nit->first))
-		  std::cout << '\t' << nit->first << "[color=chartreuse,style=filled, fillcolor=\"#ffefef\"];\n";
+		if (isFinal(state_it->first))
+		  out << '\t' << state_it->first << "[color=chartreuse,style=filled, fillcolor=\"#ffefef\"];\n";
 	  }
 
-	  std::cout << "}\n";
+	  out << "}\n";
 	}
 
 	size_t wordCount() const {

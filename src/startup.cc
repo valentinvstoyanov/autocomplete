@@ -7,11 +7,9 @@
 #include "../include/seeder.h"
 #include "../include/command_parser.h"
 
-void print_greeting() {
-  std::cout << "Welcome to autocomplete console application!" << std::endl;
-}
+using Char = wchar_t;
+using Word = std::basic_string<Char>;
 
-template<typename Char = char, typename Word = std::basic_string<Char>>
 time_t seed_autocomplete(unsigned size, char** const filenames, Autocomplete<Char, Word>& autocomplete) {
   time_t start = time(NULL);
 
@@ -26,7 +24,7 @@ time_t seed_autocomplete(unsigned size, char** const filenames, Autocomplete<Cha
 
   size_t counter = 0;
   const auto word_callback = [&counter](const Word& word) -> bool {
-	std::cout << '\t' << ++counter << ' ' << word << " inserted...\n";
+	std::wcout << L'\t' << ++counter << L' ' << word << L" inserted...\n";
 	return true;
   };
 
@@ -35,36 +33,30 @@ time_t seed_autocomplete(unsigned size, char** const filenames, Autocomplete<Cha
   return time(NULL) - start;
 }
 
-template<typename Char = char, typename Word = std::basic_string<Char>>
 void run_input_parser(Autocomplete<Char, Word>& autocomplete) {
   std::vector<Word> suggestions;
   Word prefix;
   do {
-	std::cout << '>';
-	std::cin >> prefix;
+	std::wcout << L'>';
+	std::wcin >> prefix;
 
-	if (prefix == ":q")
+	if (prefix == L":q")
 	  break;
 
 	bool suggested = autocomplete.suggest(prefix, [&prefix](const Word& word) {
-	  std::cout << '\t' << prefix << word << "\n";
+	  std::wcout << L'\t' << prefix << word << "\n";
 	});
 
 	if (!suggested)
-	  std::cout << "Nothing to suggest for " << prefix << std::endl;
+	  std::wcout << L"Nothing to suggest for " << prefix << std::endl;
   } while (true);
 }
 
 int main(int argc, char** argv) {
-  print_greeting();
-
   if (argc <= 1) {
 	std::cout << "No words data set supplied. Run with some command line arguments" << std::endl;
 	return 0;
   }
-
-  using Char = char;
-  using Word = std::basic_string<Char>;
 
   Autocomplete<Char, Word> autocomplete;
 
@@ -73,7 +65,7 @@ int main(int argc, char** argv) {
   std::cout << "Total words seeded " << autocomplete.wordCount() << std::endl;
 
   if (!autocomplete.empty())
-  	run_input_parser(autocomplete);
+	run_input_parser(autocomplete);
 
   return 0;
 }

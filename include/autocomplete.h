@@ -14,7 +14,7 @@
 template<typename Char = char, typename Word = std::basic_string<Char>>
   class Autocomplete {
 
-	using ConstWordRef = const Word &;
+	using ConstWordRef = const Word&;
 
 	using State = unsigned long;
 	using OptionalState = std::optional<State>;
@@ -44,7 +44,7 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 
 	bool isFinal(State state) const {
 	  assert(state < states_info.size() && "Cannot check if non-existing state is final");
-	  return states_info[state]==kFinalCh || states_info[state]==kBothCh;
+	  return states_info[state] == kFinalCh || states_info[state] == kBothCh;
 	}
 
 	bool isFinal(OptionalState state) const {
@@ -53,7 +53,7 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 
 	bool isConfluence(State state) const {
 	  assert(state < states_info.size() && "Cannot check if non-existing state is confluence");
-	  return states_info[state]==kConfluenceCh || states_info[state]==kBothCh;
+	  return states_info[state] == kConfluenceCh || states_info[state] == kBothCh;
 	}
 
 	bool isConfluence(OptionalState state) const {
@@ -69,19 +69,19 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 	}
 
 	bool compare(State s1, State s2) const {
-	  return s1==s2;
+	  return s1 == s2;
 	}
 
 	OptionalState delta(State state, Char ch) const {
 	  auto state_it = states.find(state);
 
-	  if (state_it==states.end())
+	  if (state_it == states.end())
 		return {};
 
-	  const TransitionMap &transitions = state_it->second;
+	  const TransitionMap& transitions = state_it->second;
 	  auto transition_it = transitions.find(ch);
 
-	  if (transition_it==transitions.end())
+	  if (transition_it == transitions.end())
 		return {};
 
 	  return transition_it->second;
@@ -100,7 +100,7 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 	}
 
 	State commonPrefixWalk(ConstWordRef word,
-						   const std::function<bool(State from, Char with, State to)> &callback) const {
+						   const std::function<bool(State from, Char with, State to)>& callback) const {
 	  State current = start;
 
 	  for (Char ch : word) {
@@ -126,16 +126,16 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 
 	void makeFinal(State state) {
 	  assert(state < states_info.size() && "Cannot make final non-existing state");
-	  states_info[state] = states_info[state]==kConfluenceCh ? kBothCh : kFinalCh;
+	  states_info[state] = states_info[state] == kConfluenceCh ? kBothCh : kFinalCh;
 	}
 
 	State clone(State state) {
 	  auto state_it = states.find(state);
-	  assert(state_it!=states.end() && "Cannot clone non-existing state");
+	  assert(state_it != states.end() && "Cannot clone non-existing state");
 
 	  State cloned = newState(isFinal(state));
-	  const TransitionMap &transitions = state_it->second;
-	  for (const auto &transition : transitions)
+	  const TransitionMap& transitions = state_it->second;
+	  for (const auto& transition : transitions)
 		states[cloned][transition.first] = transition.second;
 
 	  return cloned;
@@ -155,23 +155,24 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 	  states[from][suffix.back()] = newState(true);
 	}
 
-	void wordsFromState(State current, Word &word, std::vector<Word> &result) const {
-	  if (isFinal(current)) {
-		result.push_back(word);
+	void wordsFromState(State current, Word& word, size_t& counter, const std::function<void(ConstWordRef)>& callback) const {
+	  if (counter == suggestions_limit)
+		return;
 
-		if (result.size()==suggestions_limit)
-		  return;
+	  if (isFinal(current)) {
+		callback(word);
+		++counter;
 	  }
 
 	  auto state_it = states.find(current);
-	  assert(state_it!=states.end() && "Cannot get words from non-existing state");
+	  assert(state_it != states.end() && "Cannot get words from non-existing state");
 
-	  const TransitionMap &transitions = state_it->second;
-	  for (auto tr_it = transitions.begin(); tr_it!=transitions.end(); ++tr_it) {
+	  const TransitionMap& transitions = state_it->second;
+	  for (auto tr_it = transitions.begin(); tr_it != transitions.end(); ++tr_it) {
 		word += tr_it->first;
-		int prev_word_len = word.length();
-		wordsFromState(tr_it->second, word, result);
-		word.erase(prev_word_len - 1);
+		const int old_word_len = word.length();
+		wordsFromState(tr_it->second, word, counter, callback);
+		word.erase(old_word_len - 1);
 	  }
 	}
    public:
@@ -179,40 +180,43 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 	explicit Autocomplete(size_t suggestions_limit = 5)
 		: start(0),
 		  states_info(1, kEmptyCh),
-		  states(StateMap()), word_counter(0),
+		  states(StateMap()),
+		  word_counter(0),
 		  suggestions_limit(suggestions_limit) {
 	  states[start];
 	}
 
-	Autocomplete(const Autocomplete &) = default;
-	Autocomplete &operator=(const Autocomplete &) = default;
+	Autocomplete(const Autocomplete&) = default;
+	Autocomplete& operator=(const Autocomplete&) = default;
 	~Autocomplete() = default;
 
 	void insert(ConstWordRef word) {
-	  /*
-	  OptionalState confluence;
-   Word common_prefix;
+	  /*OptionalState confluence;
+	  Word common_prefix;
 
-   State last = commonPrefixWalk(word,
-		   [this, &confluence, &common_prefix](State from, Char with, State to) -> bool {
-			   common_prefix.push_back(with);
+	  State last = commonPrefixWalk(word,
+									[this, &confluence, &common_prefix](State from, Char with, State to) -> bool {
+									  common_prefix.push_back(with);
 
-			   if (!confluence && isConfluence(to))
-				   confluence = to;
+									  if (!confluence && isConfluence(to))
+										confluence = to;
 
-			   return true;
-		   });
+									  return true;
+									});
 
-   Word remaining_suffix = word.substr(common_prefix.length());
+	  Word remaining_suffix = word.substr(common_prefix.length());
 
-   if (isEpsilon(remaining_suffix) && isFinal(last))
-	   return;
+	  if (isEpsilon(remaining_suffix) && isFinal(last))
+		return;
 
-   if (confluence)
-	   last = clone(last);
+	  if (confluence)
+		last = clone(last);
 
-   addSuffix(last, remaining_suffix);*/
+	  addSuffix(last, remaining_suffix);
 
+	  if (confluence) {
+
+	  }*/
 
 	  Word prefix;
 	  State last = commonPrefixWalk(word, [&prefix](State from, Char with, State to) -> bool {
@@ -229,31 +233,34 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 	  ++word_counter;
 	}
 
-	void suggest(ConstWordRef prefix, std::vector<Word> &result) const {
-	  result.clear();
-
+	bool suggest(ConstWordRef prefix, const std::function<void(ConstWordRef)>& callback) const {
 	  Word common_prefix;
 	  State last = commonPrefixWalk(prefix, [&common_prefix](State from, Char with, State to) -> bool {
 		common_prefix += with;
 		return true;
 	  });
 
+	  if(prefix.length() != common_prefix.length() && !delta(last, prefix[common_prefix.length() - 1]))
+		return false;
+
 	  Word buff;
-	  wordsFromState(last, buff, result);
+	  size_t counter = 0;
+	  wordsFromState(last, buff, counter, callback);
+	  return true;
 	}
 
 	//TODO: delete this horrible function
-	void print() const {
+	void printInDotFormat() const {
 	  std::cout << "digraph {\n";
 
-	  for (auto nit = states.begin(); nit!=states.end(); ++nit) {
-		TransitionMap &emap = nit->second;
+	  for (auto nit = states.begin(); nit != states.end(); ++nit) {
+		TransitionMap& emap = nit->second;
 
-		for (auto eit = emap.begin(); eit!=emap.end(); ++eit)
+		for (auto eit = emap.begin(); eit != emap.end(); ++eit)
 		  std::cout << '\t' << nit->first << " -> " << eit->second << " [label=\"" << eit->first << "\"];\n";
 
 		if (isFinal(nit->first))
-		  std::cout << '\t' << nit->first << "[color=red,style=filled, fillcolor=\"#ffefef\"];\n";
+		  std::cout << '\t' << nit->first << "[color=chartreuse,style=filled, fillcolor=\"#ffefef\"];\n";
 	  }
 
 	  std::cout << "}\n";
@@ -261,6 +268,10 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 
 	size_t wordCount() const {
 	  return word_counter;
+	}
+
+	bool empty() const {
+	  return word_counter == 0;
 	}
 
 	size_t suggestionsLimit() const {

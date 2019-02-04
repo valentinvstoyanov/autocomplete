@@ -1,18 +1,21 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <ctime>
 
 #include "../include/autocomplete.h"
 #include "../include/seeder.h"
+#include "../include/command_parser.h"
 
 void print_greeting() {
-  std::cout << "Welcome to autocomplete console application!";
-  std::cout << std::endl;
+  std::cout << "Welcome to autocomplete console application!" << std::endl;
 }
 
 template<typename Char = char, typename Word = std::basic_string<Char>>
-void seed_autocomplete(unsigned size, char **const filenames, Autocomplete<Char, Word> &ac) {
-  const auto file_callback = [](const std::string &filename, bool success) -> bool {
+time_t seed_autocomplete(unsigned size, char** const filenames, Autocomplete<Char, Word>& autocomplete) {
+  time_t start = time(NULL);
+
+  const auto file_callback = [](const char* filename, bool success) -> bool {
 	if (success)
 	  std::cout << "Reading from " << filename << "...\n";
 	else
@@ -22,23 +25,37 @@ void seed_autocomplete(unsigned size, char **const filenames, Autocomplete<Char,
   };
 
   size_t counter = 0;
-  const auto word_callback = [&counter](const std::string &word) -> bool {
+  const auto word_callback = [&counter](const Word& word) -> bool {
 	std::cout << '\t' << ++counter << ' ' << word << " inserted...\n";
 	return true;
   };
 
-  Seeder::seedFromFiles(size, filenames, ac, file_callback, word_callback);
+  Seeder::seedFromFiles<Char, Word>(size, filenames, autocomplete, file_callback, word_callback);
 
-  //TODO
-  std::cout << "words: " << counter << std::endl;
+  return time(NULL) - start;
 }
 
 template<typename Char = char, typename Word = std::basic_string<Char>>
-void run_input_parser(Autocomplete<Char, Word> &ac) {
-  //TODO
+void run_input_parser(Autocomplete<Char, Word>& autocomplete) {
+  std::vector<Word> suggestions;
+  Word prefix;
+  do {
+	std::cout << '>';
+	std::cin >> prefix;
+
+	if (prefix == ":q")
+	  break;
+
+	bool suggested = autocomplete.suggest(prefix, [&prefix](const Word& word) {
+	  std::cout << '\t' << prefix << word << "\n";
+	});
+
+	if (!suggested)
+	  std::cout << "Nothing to suggest for " << prefix << std::endl;
+  } while (true);
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   print_greeting();
 
   if (argc <= 1) {
@@ -46,22 +63,17 @@ int main(int argc, char **argv) {
 	return 0;
   }
 
-  Autocomplete autocomplete;
-  seed_autocomplete(static_cast<unsigned int>(argc - 1), argv + 1, autocomplete);
+  using Char = char;
+  using Word = std::basic_string<Char>;
 
-  //TODO
-  std::cout << "words in autocomplete: " << autocomplete.wordCount() << "\n";
+  Autocomplete<Char, Word> autocomplete;
 
-  std::string prefix("zwitter");
-  std::cout << "Suggestions for: " << prefix << "\n";
-  std::vector<std::string> suggestions;
-  autocomplete.suggest(prefix, suggestions);
-  for (const std::string &str: suggestions)
-	std::cout << '\t' << prefix << str << "\n";
+  time_t elapsed_time = seed_autocomplete(static_cast<unsigned int>(argc - 1), argv + 1, autocomplete);
+  std::cout << "Seeding finished in " << elapsed_time << 's' << std::endl;
+  std::cout << "Total words seeded " << autocomplete.wordCount() << std::endl;
 
-  //autocomplete.print();
-
-  run_input_parser(autocomplete);
+  if (!autocomplete.empty())
+  	run_input_parser(autocomplete);
 
   return 0;
 }

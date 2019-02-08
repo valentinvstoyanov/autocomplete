@@ -7,6 +7,7 @@
 #include <optional>
 #include <cassert>
 #include <ostream>
+#include <unordered_set>
 
 template<typename Char = char, typename Word = std::basic_string<Char>>
   class Autocomplete {
@@ -28,33 +29,21 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 	using ConstStateIt = typename StateMap::const_iterator;
 	using ConstTransitionIt = typename TransitionMap::const_iterator;
 
-	StateMap states;
 	State start;
-	std::vector<char> states_info;
+
+	StateMap states;
+	std::vector<bool> info;
+
 	size_t word_counter;
 	size_t suggestions_limit;
 
-	static constexpr char kFinalCh = 'f';
-	static constexpr char kConfluenceCh = 'c';
-	static constexpr char kBothCh = 'b';
-	static constexpr char kEmptyCh = '\0';
-
 	bool isFinal(State state) const {
-	  assert(state < states_info.size() && "Cannot check if non-existing state is final");
-	  return states_info[state] == kFinalCh || states_info[state] == kBothCh;
+	  assert(state < info.size() && "Cannot check if non-existing state is final");
+	  return info[state];
 	}
 
 	bool isFinal(OptionalState state) const {
 	  return state ? isFinal(*state) : false;
-	}
-
-	bool isConfluence(State state) const {
-	  assert(state < states_info.size() && "Cannot check if non-existing state is confluence");
-	  return states_info[state] == kConfluenceCh || states_info[state] == kBothCh;
-	}
-
-	bool isConfluence(OptionalState state) const {
-	  return state ? isConfluence(*state) : false;
 	}
 
 	bool recognizes(ConstWordRef word) const {
@@ -118,26 +107,169 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 	State newState(bool final = false) {
 	  State state(states.size());
 	  states[state];
-	  states_info.push_back(final ? kFinalCh : kEmptyCh);
+	  info.push_back(final);
 	  return state;
 	}
 
 	void makeFinal(State state) {
-	  assert(state < states_info.size() && "Cannot make final non-existing state");
-	  states_info[state] = states_info[state] == kConfluenceCh ? kBothCh : kFinalCh;
+	  assert(state < info.size() && "Cannot make final non-existing state");
+	  info[state] = true;
 	}
 
-	State clone(State state) {
-	  auto state_it = states.find(state);
-	  assert(state_it != states.end() && "Cannot clone non-existing state");
+	/*
+	using EquivalenceClassIndex = size_t;
+	using EquivalenceClassIndexContainer = std::vector<EquivalenceClassIndex>;
+	using EquivalenceClass = std::unordered_set<State>;
+	using EquivalenceClassIndexToClass = std::unordered_map<EquivalenceClassIndex, EquivalenceClass>;
+	using StateToEquivalenceClassIndex = std::unordered_map<State, EquivalenceClassIndex>;
 
-	  State cloned = newState(isFinal(state));
-	  const TransitionMap& transitions = state_it->second;
-	  for (const auto& transition : transitions)
-		states[cloned][transition.first] = transition.second;
+	struct Partition {
+	  EquivalenceClassIndexToClass idx_to_class;
+	  StateToEquivalenceClassIndex state_to_idx;
+	  EquivalenceClassIndexContainer new_class_idxs;
 
-	  return cloned;
+	  void insert(State state, EquivalenceClassIndex idx) {
+		idx_to_class[idx].insert(state);
+		state_to_idx[state] = idx;
+	  }
+
+	  EquivalenceClass& classByIdx(EquivalenceClassIndex idx) {
+		return idx_to_class[idx];
+	  }
+
+	  EquivalenceClassIndex classIdxByState(State state) const {
+		auto it = state_to_idx.find(state);
+		assert(it != state_to_idx.end() && "Cannot get class index from non-existing state");
+		return it->second;
+	  }
+
+	  size_t size() const {
+		return idx_to_class.size();
+	  }
+
+	  EquivalenceClassIndex nextIdx() const {
+		return idx_to_class.size();
+	  }
+	};
+
+	bool areEquivalent(State first, State second, Partition& partition) const {
+	  const TransitionMap& first_transitions = states.find(first)->second;
+	  const TransitionMap& second_transitions = states.find(second)->second;
+
+	  if (first_transitions.size() != second_transitions.size())
+		return false;
+
+	  for (const auto& transition: first_transitions) {
+		OptionalState next = delta(second, transition.first);
+		if ((next && (partition.classIdxByState(*next) != partition.classIdxByState(transition.second))) || !next)
+		  return false;
+	  }
+
+	  return true;
 	}
+
+	std::optional<EquivalenceClassIndex> findSuitableExistingClass(State current, Partition& cpartition, Partition& partition) const {
+	  for (EquivalenceClassIndex class_index: partition.new_class_idxs)
+		if (areEquivalent(*(partition.classByIdx(class_index).begin()), current, cpartition))
+		  return class_index;
+
+	  return {};
+	}
+
+	void partitionClass(EquivalenceClass& eq_class, Partition& partition, Partition& const_partition) const {
+	  auto eq_class_it = eq_class.begin();
+	  State representative = *eq_class_it;
+	  ++eq_class_it;
+
+	  while (eq_class_it != eq_class.end()) {
+		State current = *eq_class_it;
+
+		if (areEquivalent(representative, current, const_partition)) {
+		  ++eq_class_it;
+		  continue;
+		}
+
+		eq_class_it = eq_class.erase(eq_class_it);
+
+		if (std::optional<EquivalenceClassIndex> class_idx = findSuitableExistingClass(current, const_partition, partition)) {
+		  partition.insert(current, *class_idx);
+		} else {
+		  const EquivalenceClassIndex idx = partition.nextIdx();
+		  partition.insert(current, idx);
+		  partition.new_class_idxs.push_back(idx);
+		}
+	  }
+	}
+
+	void partitionClasses(Partition& partition) const {
+	  Partition const_partition = partition;
+	  const size_t initial_partition_size = partition.size();
+	  for (size_t i = 0; i < initial_partition_size; ++i) {
+		EquivalenceClass& eq_class = partition.idx_to_class[i];
+		assert(!eq_class.empty() && "Equivalence class cannot be empty");
+		if (eq_class.size() == 1)
+		  continue;
+
+		partitionClass(eq_class, partition, const_partition);
+	  }
+	}
+
+	void buildAutocompleteFromPartition(Partition& partition) {
+	  StateMap state_map;
+	  std::vector<bool> state_info;
+
+	  for (EquivalenceClassIndex i = 0; i < partition.size(); ++i) {
+	    const EquivalenceClass& eq_class = partition.classByIdx(i);
+		assert(!eq_class.empty() && "Equivalence class cannot be empty");
+	    State representative = *(eq_class.begin());
+
+	    const TransitionMap& transitions = states[representative];
+	    for (const auto& transition: transitions) {
+	      Char with = transition.first;
+	      State to = transition.second;
+	      state_map[i][with] = partition.classIdxByState(to);
+	    }
+
+	    state_info.push_back(isFinal(representative));
+	  }
+
+	  states = state_map;
+	  info = state_info;
+	  start = partition.classIdxByState(start);
+	}
+
+	void minimize() {
+	  Partition partition;
+	  for (size_t i = 0; i < info.size(); ++i) {
+	    partition.insert(i, static_cast<EquivalenceClassIndex>(info[i]));
+	    //std::cout << static_cast<EquivalenceClassIndex>(info[i]) << std::endl;
+	  }
+
+	  size_t previous_partition_size = partition.size();
+
+	  while (true) {
+*/
+	   /* std::cout << "size: " << partition.size() << std::endl;
+		for (auto& p: partition.idx_to_class) {
+		  std::cout << "{ ";
+		  for (auto state: p.second) {
+			std::cout << state << ' ';
+		  }
+		  std::cout << "} ";
+		}
+		std::cout << "\n";*/
+
+		/*partitionClasses(partition);
+
+		if (partition.size() == previous_partition_size)
+		  break;
+
+		previous_partition_size = partition.size();
+		partition.new_class_idxs.clear();
+	  }
+
+	  buildAutocompleteFromPartition(partition);
+	}*/
 
 	void addSuffix(State from, ConstWordRef suffix) {
 	  if (isEpsilon(suffix)) {
@@ -183,7 +315,7 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
    public:
 	explicit Autocomplete(size_t suggestions_limit = 5)
 		: start(0),
-		  states_info(1, kEmptyCh),
+		  info(1, false),
 		  states(StateMap()),
 		  word_counter(0),
 		  suggestions_limit(suggestions_limit) {
@@ -195,33 +327,6 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 	~Autocomplete() = default;
 
 	void insert(ConstWordRef word) {
-	  /*OptionalState confluence;
-	  Word common_prefix;
-
-	  State last = commonPrefixWalk(word,
-									[this, &confluence, &common_prefix](State from, Char with, State to) -> bool {
-									  common_prefix.push_back(with);
-
-									  if (!confluence && isConfluence(to))
-										confluence = to;
-
-									  return true;
-									});
-
-	  Word remaining_suffix = word.substr(common_prefix.length());
-
-	  if (isEpsilon(remaining_suffix) && isFinal(last))
-		return;
-
-	  if (confluence)
-		last = clone(last);
-
-	  addSuffix(last, remaining_suffix);
-
-	  if (confluence) {
-
-	  }*/
-
 	  Word prefix;
 	  State last = commonPrefixWalk(word, [&prefix](State from, Char with, State to) -> bool {
 		prefix += with;
@@ -254,20 +359,20 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 	}
 
 	//TODO: delete this horrible function
-	void printInDotFormat(std::ostream& out) const {
+	void printInDotFormat(std::basic_ostream<Char>& out) const {
 	  out << "digraph {\n";
 
 	  for (auto state_it = states.begin(); state_it != states.end(); ++state_it) {
-		TransitionMap& emap = state_it->second;
+		const TransitionMap& tr_map = state_it->second;
 
-		for (auto tr_it = emap.begin(); tr_it != emap.end(); ++tr_it)
+		for (auto tr_it = tr_map.begin(); tr_it != tr_map.end(); ++tr_it)
 		  out << '\t' << state_it->first << " -> " << tr_it->second << " [label=\"" << tr_it->first << "\"];\n";
 
 		if (isFinal(state_it->first))
-		  out << '\t' << state_it->first << "[color=chartreuse,style=filled, fillcolor=\"#ffefef\"];\n";
+		  out << '\t' << state_it->first << "[color=chartreuse,style=filled, fillcolor=\"#e7f9d1\"];\n";
 	  }
 
-	  out << "}\n";
+	  out << '\t' << start << "[color=blue1,style=filled, fillcolor=\"#cde3f7\"];\n}\n";
 	}
 
 	size_t wordCount() const {
@@ -276,6 +381,11 @@ template<typename Char = char, typename Word = std::basic_string<Char>>
 
 	bool empty() const {
 	  return word_counter == 0;
+	}
+
+	//TODO: delete this accessor
+	size_t stateCount() const {
+	  return states.size();
 	}
 
 	size_t suggestionsLimit() const {

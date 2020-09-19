@@ -2,4 +2,6 @@
 *.out
 ./dataset/**
 ./src/obj/**
+./.idea/
 ./.idea/**
+./cmake-build-debug/**

@@ -1,6 +1,6 @@
 *.o
 *.out
-./dataset/**
-./src/obj/**
-./.idea/**
-./cmake-build-debug/**
+dataset/**
+src/obj/**
+.idea/**
+cmake-build-debug/**
